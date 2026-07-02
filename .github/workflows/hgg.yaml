@@ -15,8 +15,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        port: [8080, 3128, 80, 1080, 3129, 8800, 8000, 8888, 9999, 443]
+        include:
+          - instance: 1
+            port: 8080
+          - instance: 2
+            port: 3128
+          - instance: 3
+            port: 80
+          - instance: 4
+            port: 1080
+          - instance: 5
+            port: 3129
+          - instance: 6
+            port: 8800
+          - instance: 7
+            port: 8000
+          - instance: 8
+            port: 8888
+          - instance: 9
+            port: 9999
+          - instance: 10
+            port: 443
 
     steps:
       - uses: actions/checkout@v4
