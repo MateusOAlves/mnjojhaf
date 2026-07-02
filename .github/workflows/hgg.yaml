@@ -43,7 +43,7 @@ jobs:
       - name: Cai dat cong cu
         run: |
           sudo apt update
-          sudo apt install -y masscan jq curl
+          sudo apt install -y zmap jq curl
 
       - name: Chia file ipv4.txt cho instance
         run: |
@@ -59,14 +59,14 @@ jobs:
           sed -n "${START},${END}p" ipv4.txt > chunk.txt
           echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP - Port: ${{ matrix.port }}"
 
-      - name: Chay masscan voi sudo
+      - name: Chay zmap voi sudo
         continue-on-error: true
         run: |
-          sudo masscan -iL chunk.txt -p${{ matrix.port }} --rate=100000 -oJ - | \
-          sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
-          jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output_${{ matrix.instance }}_${{ matrix.port }}.txt
+          sudo zmap -p ${{ matrix.port }} -iL chunk.txt -o - | \
+          awk '{print $1":${{ matrix.port }}"}' > output_${{ matrix.instance }}_${{ matrix.port }}.txt
           
           echo "Instance ${{ matrix.instance }} da scan xong port ${{ matrix.port }}"
+          echo "So luong tim thay: $(wc -l < output_${{ matrix.instance }}_${{ matrix.port }}.txt)"
       
       - name: Upload ket qua
         uses: actions/upload-artifact@v4
