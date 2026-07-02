@@ -16,6 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        port: [8080, 3128, 80, 1080, 3129, 8800, 8000, 8888, 9999, 443]
 
     steps:
       - uses: actions/checkout@v4
@@ -23,35 +24,91 @@ jobs:
       - name: Cài đặt công cụ
         run: |
           sudo apt update
-          sudo apt install -y masscan jq golang-go
+          sudo apt install -y masscan jq curl
 
       - name: Chia file ipv4.txt cho instance
         run: |
           TOTAL=$(wc -l < ipv4.txt)
-          LINES=$((TOTAL / 20))
+          LINES=$((TOTAL / 10))
           START=$(( (${{ matrix.instance }} - 1) * LINES + 1 ))
           END=$(( ${{ matrix.instance }} * LINES ))
           
-          if [ ${{ matrix.instance }} -eq 20 ]; then
+          if [ ${{ matrix.instance }} -eq 10 ]; then
             END=$TOTAL
           fi
           
           sed -n "${START},${END}p" ipv4.txt > chunk.txt
-          echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP"
+          echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP - Port: ${{ matrix.port }}"
 
       - name: Chạy masscan với sudo
         continue-on-error: true
         run: |
-          sudo masscan -iL chunk.txt -p22 --rate=100000 -oJ - | \
+          sudo masscan -iL chunk.txt -p${{ matrix.port }} --rate=100000 -oJ - | \
           sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
-          jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output.txt
+          jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output_${{ matrix.instance }}_${{ matrix.port }}.txt
+          
+          echo "Instance ${{ matrix.instance }} đã scan xong port ${{ matrix.port }}"
+      
+      - name: Upload kết quả
+        uses: actions/upload-artifact@v4
+        with:
+          name: output_${{ matrix.instance }}_${{ matrix.port }}
+          path: output_${{ matrix.instance }}_${{ matrix.port }}.txt
+          if-no-files-found: ignore
 
-      - name: Setup Go modules
+  merge-and-send:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Download tất cả kết quả
+        uses: actions/download-artifact@v4
+        with:
+          pattern: output_*
+          path: ./all_outputs/
+          merge-multiple: true
+      
+      - name: Merge tất cả kết quả
         run: |
-          go mod init check
-          go mod tidy
-
-      - name: Chạy check.go
-        continue-on-error: true
+          cd all_outputs
+          
+          # Merge tất cả file output (giữ nguyên duplicate)
+          cat *.txt 2>/dev/null > final_result.txt || echo "Không có file output nào"
+          
+          COUNT=$(wc -l < final_result.txt)
+          echo "Tổng số IP:port (bao gồm duplicate): $COUNT"
+          
+          # Lưu kết quả vào thư mục chính
+          cp final_result.txt ../final_result.txt
+      
+      - name: Gửi kết quả lên Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
+          TELEGRAM_CHAT_ID: "6320839835"
         run: |
-          go run check.go user.txt pass.txt output.txt 10 300 500 proxy.txt
+          COUNT=$(wc -l < final_result.txt)
+          
+          # Gửi thông báo
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="✅ Scan hoàn tất! Tổng số IP:port: ${COUNT}" \
+            -d parse_mode="HTML"
+          
+          # Gửi file kết quả
+          if [ $COUNT -gt 0 ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+              -F chat_id="${TELEGRAM_CHAT_ID}" \
+              -F document=@final_result.txt \
+              -F caption="📊 Kết quả scan các port: 8080, 3128, 80, 1080, 3129, 8800, 8000, 8888, 9999, 443"
+          else
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" \
+              -d text="⚠️ Không tìm thấy IP:port nào"
+          fi
+      
+      - name: Upload kết quả cuối cùng
+        uses: actions/upload-artifact@v4
+        with:
+          name: final_result
+          path: final_result.txt
