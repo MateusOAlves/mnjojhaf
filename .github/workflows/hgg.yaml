@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cài đặt công cụ
+      - name: Cai dat cong cu
         run: |
           sudo apt update
           sudo apt install -y masscan jq curl
@@ -40,16 +40,16 @@ jobs:
           sed -n "${START},${END}p" ipv4.txt > chunk.txt
           echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP - Port: ${{ matrix.port }}"
 
-      - name: Chạy masscan với sudo
+      - name: Chay masscan voi sudo
         continue-on-error: true
         run: |
           sudo masscan -iL chunk.txt -p${{ matrix.port }} --rate=100000 -oJ - | \
           sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
           jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output_${{ matrix.instance }}_${{ matrix.port }}.txt
           
-          echo "Instance ${{ matrix.instance }} đã scan xong port ${{ matrix.port }}"
+          echo "Instance ${{ matrix.instance }} da scan xong port ${{ matrix.port }}"
       
-      - name: Upload kết quả
+      - name: Upload ket qua
         uses: actions/upload-artifact@v4
         with:
           name: output_${{ matrix.instance }}_${{ matrix.port }}
@@ -62,52 +62,45 @@ jobs:
     if: always()
     
     steps:
-      - name: Download tất cả kết quả
+      - name: Download tat ca ket qua
         uses: actions/download-artifact@v4
         with:
           pattern: output_*
           path: ./all_outputs/
           merge-multiple: true
       
-      - name: Merge tất cả kết quả
+      - name: Merge tat ca ket qua
         run: |
           cd all_outputs
-          
-          # Merge tất cả file output (giữ nguyên duplicate)
-          cat *.txt 2>/dev/null > final_result.txt || echo "Không có file output nào"
-          
+          cat *.txt 2>/dev/null > final_result.txt || echo "Khong co file output nao"
           COUNT=$(wc -l < final_result.txt)
-          echo "Tổng số IP:port (bao gồm duplicate): $COUNT"
-          
-          # Lưu kết quả vào thư mục chính
+          echo "Tong so IP:port: $COUNT"
           cp final_result.txt ../final_result.txt
       
-      - name: Gửi kết quả lên Telegram
+      - name: Gui ket qua len Telegram
         env:
           TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
           TELEGRAM_CHAT_ID: "6320839835"
         run: |
           COUNT=$(wc -l < final_result.txt)
           
-          # Gửi thông báo
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="✅ Scan hoàn tất! Tổng số IP:port: ${COUNT}" \
+            -d text="Scan hoan tat! Tong so IP:port: ${COUNT}" \
             -d parse_mode="HTML"
           
-          # Gửi file kết quả
           if [ $COUNT -gt 0 ]; then
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHAT_ID}" \
               -F document=@final_result.txt \
-              -F caption="📊 Kết quả scan các port: 8080, 3128, 80, 1080, 3129, 8800, 8000, 8888, 9999, 443"
+              -F caption="Ket qua scan cac port: 8080, 3128, 80, 1080, 3129, 8800, 8000, 8888, 9999, 443"
           else
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d text="⚠️ Không tìm thấy IP:port nào"
+              -d text="Khong tim thay IP:port nao"
           fi
       
-      - name: Upload kết quả cuối cùng
+      - name: Upload ket qua cuoi cung
         uses: actions/upload-artifact@v4
         with:
           name: final_result
