@@ -62,8 +62,7 @@ jobs:
       - name: Chay zmap voi sudo
         continue-on-error: true
         run: |
-          sudo zmap -p ${{ matrix.port }} -iL chunk.txt -o - | \
-          awk '{print $1":${{ matrix.port }}"}' > output_${{ matrix.instance }}_${{ matrix.port }}.txt
+          sudo zmap -p "${{ matrix.port }}" -w chunk.txt -o - | awk '{print $1 ":" "${{ matrix.port }}"}' > "output_${{ matrix.instance }}_${{ matrix.port }}.txt"
           
           echo "Instance ${{ matrix.instance }} da scan xong port ${{ matrix.port }}"
           echo "So luong tim thay: $(wc -l < output_${{ matrix.instance }}_${{ matrix.port }}.txt)"
