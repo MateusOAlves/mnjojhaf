@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     steps:
       - uses: actions/checkout@v4
@@ -49,4 +49,6 @@ jobs:
       - name: Chạy check.go
         continue-on-error: true
         run: |
+          go mod init check
+          go get golang.org/x/crypto/ssh
           go run check.go user.txt pass.txt output.txt 10 300 500 proxy.txt
