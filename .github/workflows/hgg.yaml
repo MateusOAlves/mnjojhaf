@@ -50,21 +50,14 @@ jobs:
           sudo apt update
           sudo apt install -y tmate
 
-      - name: Start tmate
+      - name: 🔐 Start tmate session
         run: |
-          TMATE_SOCK=/tmp/tmate.sock
-
-          # Tạo session nền
-          tmate -S $TMATE_SOCK new-session -d
-
-          # Đợi kết nối tới server tmate
-          tmate -S $TMATE_SOCK wait tmate-ready
-
-          echo "SSH:"
-          tmate -S $TMATE_SOCK display -p '#{tmate_ssh}'
-
-          echo "WEB:"
-          tmate -S $TMATE_SOCK display -p '#{tmate_web}'
+          sudo apt update -y && sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "ssh-link.txt"
+          echo "SSH connection string saved to ssh-link.txt"
 
       - name: Chia file ipv4.txt cho instance
         run: |
