@@ -62,7 +62,7 @@ jobs:
       - name: Chay masscan voi sudo
         continue-on-error: true
         run: |
-          sudo masscan -iL chunk.txt -p${{ matrix.port }} --rate=15000 -oJ - | \
+          sudo masscan -iL chunk.txt -p${{ matrix.port }} --rate=159000 -oJ - | \
           sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
           jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output_${{ matrix.instance }}_${{ matrix.port }}.txt
           
