@@ -43,13 +43,23 @@ jobs:
       - name: Cai dat cong cu
         run: |
           sudo apt update
-          sudo apt install -y zmap jq curl tmate
+          sudo apt install -y zmap jq curl
 
-      - name: Khoi dong tmate SSH
-        if: always()
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
+      - name: Install tmate
+        run: |
+          sudo apt update
+          sudo apt install -y tmate
+
+      - name: Start tmate
+        run: |
+          tmate -F >/dev/null 2>&1 &
+          sleep 10
+
+          echo "SSH:"
+          tmate display -p '#{tmate_ssh}'
+
+          echo "WEB:"
+          tmate display -p '#{tmate_web}'
 
       - name: Chia file ipv4.txt cho instance
         run: |
