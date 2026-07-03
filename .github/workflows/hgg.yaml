@@ -71,10 +71,6 @@ jobs:
           # Chạy zmap và hiển thị cả stderr (progress bar)
           sudo zmap -p "${{ matrix.port }}" -w chunk.txt -o - 2>&1 | tee /tmp/zmap_progress.log | awk '{print $1 ":" "${{ matrix.port }}"}' > "output_${{ matrix.instance }}_${{ matrix.port }}.txt"
           
-          # Hiển thị progress log trong GitHub
-          echo "=== ZMAP PROGRESS LOG ==="
-          cat /tmp/zmap_progress.log
-          echo "==========================="
           
           echo "Instance ${{ matrix.instance }} da scan xong port ${{ matrix.port }}"
           echo "So luong tim thay: $(wc -l < output_${{ matrix.instance }}_${{ matrix.port }}.txt)"
