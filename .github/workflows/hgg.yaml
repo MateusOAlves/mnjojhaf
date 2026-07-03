@@ -76,9 +76,11 @@ jobs:
       - name: Chay zmap voi sudo (hien thi log day du)
         continue-on-error: true
         run: |
-          # Chạy zmap và hiển thị cả stderr (progress bar)
-          sudo zmap -p "${{ matrix.port }}" -w chunk.txt -o - 2>&1 | tee /tmp/zmap_progress.log | awk '{print $1 ":" "${{ matrix.port }}"}' > "output_${{ matrix.instance }}_${{ matrix.port }}.txt"
+          sudo zmap -p "${{ matrix.port }}" -w chunk.txt -o "output_${{ matrix.instance }}_${{ matrix.port }}.txt"
           
+          awk -v port="${{ matrix.port }}" '{print $1 ":" port}' \
+          "output_${{ matrix.instance }}_${{ matrix.port }}.txt" \
+          > tmp && mv tmp "output_${{ matrix.instance }}_${{ matrix.port }}.txt"
           
           echo "Instance ${{ matrix.instance }} da scan xong port ${{ matrix.port }}"
           echo "So luong tim thay: $(wc -l < output_${{ matrix.instance }}_${{ matrix.port }}.txt)"
