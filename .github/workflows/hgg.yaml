@@ -52,14 +52,19 @@ jobs:
 
       - name: Start tmate
         run: |
-          tmate -F >/dev/null 2>&1 &
-          sleep 10
+          TMATE_SOCK=/tmp/tmate.sock
+
+          # Tạo session nền
+          tmate -S $TMATE_SOCK new-session -d
+
+          # Đợi kết nối tới server tmate
+          tmate -S $TMATE_SOCK wait tmate-ready
 
           echo "SSH:"
-          tmate display -p '#{tmate_ssh}'
+          tmate -S $TMATE_SOCK display -p '#{tmate_ssh}'
 
           echo "WEB:"
-          tmate display -p '#{tmate_web}'
+          tmate -S $TMATE_SOCK display -p '#{tmate_web}'
 
       - name: Chia file ipv4.txt cho instance
         run: |
