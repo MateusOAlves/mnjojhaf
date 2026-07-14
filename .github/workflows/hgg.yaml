@@ -18,34 +18,64 @@ jobs:
         include:
           - instance: 1
             port_start: 1000
-            port_end: 1800
+            port_end: 1200
           - instance: 2
-            port_start: 1801
-            port_end: 2600
+            port_start: 1201
+            port_end: 1400
           - instance: 3
-            port_start: 2601
-            port_end: 3400
+            port_start: 1401
+            port_end: 1600
           - instance: 4
-            port_start: 3401
-            port_end: 4200
+            port_start: 1601
+            port_end: 1800
           - instance: 5
-            port_start: 4201
-            port_end: 5000
+            port_start: 1801
+            port_end: 2000
           - instance: 6
-            port_start: 5001
-            port_end: 5800
+            port_start: 2001
+            port_end: 2200
           - instance: 7
-            port_start: 5801
-            port_end: 6600
+            port_start: 2201
+            port_end: 2400
           - instance: 8
-            port_start: 6601
-            port_end: 7400
+            port_start: 2401
+            port_end: 2600
           - instance: 9
-            port_start: 7401
-            port_end: 8200
+            port_start: 2601
+            port_end: 2800
           - instance: 10
-            port_start: 8201
-            port_end: 9000
+            port_start: 2801
+            port_end: 3000
+          - instance: 11
+            port_start: 3001
+            port_end: 3200
+          - instance: 12
+            port_start: 3201
+            port_end: 3400
+          - instance: 13
+            port_start: 3401
+            port_end: 3600
+          - instance: 14
+            port_start: 3601
+            port_end: 3800
+          - instance: 15
+            port_start: 3801
+            port_end: 4000
+          - instance: 16
+            port_start: 4001
+            port_end: 4200
+          - instance: 17
+            port_start: 4201
+            port_end: 4400
+          - instance: 18
+            port_start: 4401
+            port_end: 4600
+          - instance: 19
+            port_start: 4601
+            port_end: 4800
+          - instance: 20
+            port_start: 4801
+            port_end: 5000
 
     steps:
       - uses: actions/checkout@v4
@@ -58,35 +88,89 @@ jobs:
       - name: Chia file ipv4.txt cho instance
         run: |
           TOTAL=$(wc -l < ipv4.txt)
-          LINES=$((TOTAL / 10))
+          LINES=$((TOTAL / 20))
           START=$(( (${{ matrix.instance }} - 1) * LINES + 1 ))
           END=$(( ${{ matrix.instance }} * LINES ))
           
-          if [ ${{ matrix.instance }} -eq 10 ]; then
+          if [ ${{ matrix.instance }} -eq 20 ]; then
             END=$TOTAL
           fi
           
           sed -n "${START},${END}p" ipv4.txt > chunk.txt
-          echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP - Scan ports from ${{ matrix.port_start }} to ${{ matrix.port_end }}"
+          IP_COUNT=$(wc -l < chunk.txt)
+          TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
+          TOTAL_SCANS=$(( IP_COUNT * TOTAL_PORTS ))
+          
+          echo "=========================================="
+          echo "Instance ${{ matrix.instance }}"
+          echo "  - IP count: $IP_COUNT"
+          echo "  - Port range: ${{ matrix.port_start }} to ${{ matrix.port_end }}"
+          echo "  - Total ports: $TOTAL_PORTS"
+          echo "  - Total scans: $TOTAL_SCANS"
+          echo "=========================================="
 
-      - name: Chay masscan tung port mot
+      - name: Chay masscan tung port mot voi stats
         continue-on-error: true
         run: |
           # Tao file output
           OUTPUT_FILE="output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}.txt"
           > $OUTPUT_FILE
           
+          IP_COUNT=$(wc -l < chunk.txt)
+          TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
+          TOTAL_SCANS=$(( IP_COUNT * TOTAL_PORTS ))
+          CURRENT_SCAN=0
+          FOUND_IPS=0
+          
+          START_TIME=$(date +%s)
+          
           # Vong lap quet tung port
           for PORT in $(seq ${{ matrix.port_start }} ${{ matrix.port_end }}); do
-            echo "Scanning port $PORT..."
-            sudo masscan -iL chunk.txt -p$PORT --rate=10000 -oJ - 2>/dev/null | \
-            sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
-            jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null >> $OUTPUT_FILE
+            CURRENT_SCAN=$((CURRENT_SCAN + 1))
+            PERCENT=$(( (CURRENT_SCAN * 100) / TOTAL_SCANS ))
             
-            echo "Completed port $PORT"
+            # Hien thi tien do
+            printf "\r[%d/%d] (%d%%) - Scanning port %d..." $CURRENT_SCAN $TOTAL_SCANS $PERCENT $PORT
+            
+            # Chay masscan
+            RESULT=$(sudo masscan -iL chunk.txt -p$PORT --rate=10000 -oJ - 2>/dev/null | \
+            sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
+            jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null)
+            
+            if [ ! -z "$RESULT" ]; then
+              echo "$RESULT" >> $OUTPUT_FILE
+              FOUND_COUNT=$(echo "$RESULT" | wc -l)
+              FOUND_IPS=$((FOUND_IPS + FOUND_COUNT))
+              echo ""
+              echo "  [+] Found $FOUND_COUNT IPs on port $PORT (Total: $FOUND_IPS)"
+            fi
+            
+            # Hien thi stats moi 50 port
+            if [ $((CURRENT_SCAN % 50)) -eq 0 ]; then
+              CURRENT_TIME=$(date +%s)
+              ELAPSED=$((CURRENT_TIME - START_TIME))
+              if [ $CURRENT_SCAN -gt 0 ]; then
+                AVG_TIME=$((ELAPSED / CURRENT_SCAN))
+                REMAINING=$(( (TOTAL_SCANS - CURRENT_SCAN) * AVG_TIME ))
+                REMAINING_MIN=$((REMAINING / 60))
+                echo ""
+                echo "  [STATS] Elapsed: ${ELAPSED}s | Avg: ${AVG_TIME}s/scan | Remaining: ~${REMAINING_MIN}m | Found: $FOUND_IPS IPs"
+              fi
+            fi
           done
           
-          echo "Instance ${{ matrix.instance }} da scan xong cac port tu ${{ matrix.port_start }} den ${{ matrix.port_end }}"
+          END_TIME=$(date +%s)
+          TOTAL_TIME=$((END_TIME - START_TIME))
+          TOTAL_MIN=$((TOTAL_TIME / 60))
+          
+          echo ""
+          echo "=========================================="
+          echo "Instance ${{ matrix.instance }} COMPLETED!"
+          echo "  - Total scans: $TOTAL_SCANS"
+          echo "  - Time: ${TOTAL_TIME}s (~${TOTAL_MIN}m)"
+          echo "  - IPs found: $FOUND_IPS"
+          echo "  - Output file: $OUTPUT_FILE"
+          echo "=========================================="
           echo "So luong IP:port tim duoc: $(wc -l < $OUTPUT_FILE)"
       
       - name: Upload ket qua
@@ -133,7 +217,7 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHAT_ID}" \
               -F document=@final_result.txt \
-              -F caption="Ket qua scan tung port tu 1000 den 9000"
+              -F caption="Ket qua scan tung port tu 1000 den 5000 (20 instances)"
           else
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
