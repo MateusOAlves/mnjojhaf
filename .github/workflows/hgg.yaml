@@ -85,24 +85,16 @@ jobs:
           sudo apt update
           sudo apt install -y masscan jq curl
 
-      - name: Chia file ipv4.txt cho instance
+      - name: Chuan bi file IP
         run: |
-          TOTAL=$(wc -l < ipv4.txt)
-          LINES=$((TOTAL / 20))
-          START=$(( (${{ matrix.instance }} - 1) * LINES + 1 ))
-          END=$(( ${{ matrix.instance }} * LINES ))
-          
-          if [ ${{ matrix.instance }} -eq 20 ]; then
-            END=$TOTAL
-          fi
-          
-          sed -n "${START},${END}p" ipv4.txt > chunk.txt
+          # Su dung toan bo file ipv4.txt cho tat ca instance
+          cp ipv4.txt chunk.txt
           IP_COUNT=$(wc -l < chunk.txt)
           TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
           
           echo "=========================================="
           echo "Instance ${{ matrix.instance }}"
-          echo "  - IP count: $IP_COUNT"
+          echo "  - IP count: $IP_COUNT (ALL IPs)"
           echo "  - Port range: ${{ matrix.port_start }} to ${{ matrix.port_end }}"
           echo "  - Total ports to scan: $TOTAL_PORTS"
           echo "=========================================="
@@ -204,7 +196,7 @@ jobs:
           path: ./all_outputs/
           merge-multiple: true
       
-      - name: Gop tat ca file va gui telegram moi 10s
+      - name: Gop tat ca file va gui telegram moi 30s
         env:
           TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
           TELEGRAM_CHAT_ID: "6320839835"
@@ -212,15 +204,12 @@ jobs:
           cd all_outputs
           
           echo "=========================================="
-          echo "Starting merge and send every 10 seconds"
+          echo "Starting merge and send every 30 seconds"
           echo "=========================================="
           
           LAST_SEND_TIME=$(date +%s)
           START_TIME=$(date +%s)
           PREVIOUS_COUNT=0
-          
-          # Tao file tam de gui
-          > temp_send.txt
           
           while true; do
             CURRENT_TIME=$(date +%s)
@@ -232,12 +221,11 @@ jobs:
               # Gop tat ca va gui lan cuoi
               cat output_*.txt 2>/dev/null | sort -u > all_merged.txt
               COUNT=$(wc -l < all_merged.txt)
-              if [ $COUNT -gt 0 ] && [ $COUNT -gt $PREVIOUS_COUNT ]; then
-                cp all_merged.txt temp_send.txt
+              if [ $COUNT -gt 0 ]; then
                 curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
                   -F chat_id="${TELEGRAM_CHAT_ID}" \
-                  -F document=@temp_send.txt \
-                  -F caption="📊 FINAL: $COUNT IPs found"
+                  -F document=@all_merged.txt \
+                  -F caption="📊 FINAL RESULT: $COUNT IPs found"
               fi
               break
             fi
@@ -247,34 +235,30 @@ jobs:
               # Gop tat ca file output
               cat output_*.txt 2>/dev/null | sort -u > all_merged.txt
               CURRENT_COUNT=$(wc -l < all_merged.txt)
-              
-              # Neu co IP moi
-              if [ $CURRENT_COUNT -gt $PREVIOUS_COUNT ]; then
-                # Tao file chi chua IP moi
-                > temp_send.txt
-                # Lay cac IP moi (tu PREVIOUS_COUNT+1 den CURRENT_COUNT)
-                head -n $CURRENT_COUNT all_merged.txt | tail -n +$((PREVIOUS_COUNT + 1)) > temp_send.txt
-                PREVIOUS_COUNT=$CURRENT_COUNT
-              fi
+            else
+              CURRENT_COUNT=0
             fi
             
-            # Gui moi 10 giay neu co du lieu
-            if [ $((CURRENT_TIME - LAST_SEND_TIME)) -ge 10 ]; then
-              if [ -s temp_send.txt ]; then
-                COUNT=$(wc -l < temp_send.txt)
-                TOTAL=$(cat output_*.txt 2>/dev/null | sort -u | wc -l)
+            # Gui moi 30 giay
+            if [ $((CURRENT_TIME - LAST_SEND_TIME)) -ge 30 ]; then
+              if [ $CURRENT_COUNT -gt 0 ]; then
+                # Gui toan bo file gop
                 curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
                   -F chat_id="${TELEGRAM_CHAT_ID}" \
-                  -F document=@temp_send.txt \
-                  -F caption="📊 Live: +$COUNT new IPs (Total: $TOTAL)"
+                  -F document=@all_merged.txt \
+                  -F caption="📊 Live Results: $CURRENT_COUNT IPs found (Updated every 30s)"
                 
-                # Xoa file tam sau khi gui
-                > temp_send.txt
+                PREVIOUS_COUNT=$CURRENT_COUNT
+              else
+                # Gui thong bao neu chua co ket qua
+                curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                  -d chat_id="${TELEGRAM_CHAT_ID}" \
+                  -d text="⏳ Scanning in progress... No IPs found yet"
               fi
               LAST_SEND_TIME=$CURRENT_TIME
             fi
             
-            sleep 2
+            sleep 5
           done
           
           # Tao final result
