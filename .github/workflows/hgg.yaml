@@ -80,38 +80,67 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cai dat cong cu
+      - name: Install tools
         run: |
           sudo apt update
           sudo apt install -y masscan jq curl
 
-      - name: Chuan bi file IP
+      - name: Split IPv4 list by instance
         run: |
-          cp ipv4.txt chunk.txt
+          if [ ! -f ipv4.txt ]; then
+            echo "ERROR: ipv4.txt not found!"
+            exit 1
+          fi
+          
+          TOTAL=$(wc -l < ipv4.txt)
+          LINES=$((TOTAL / 20))
+          START=$(( (${{ matrix.instance }} - 1) * LINES + 1 ))
+          END=$(( ${{ matrix.instance }} * LINES ))
+          
+          if [ ${{ matrix.instance }} -eq 20 ]; then
+            END=$TOTAL
+          fi
+          
+          sed -n "${START},${END}p" ipv4.txt > chunk.txt
           IP_COUNT=$(wc -l < chunk.txt)
           TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
           
           echo "=========================================="
           echo "Instance ${{ matrix.instance }}"
-          echo "  - IP count: $IP_COUNT (ALL IPs)"
+          echo "  - IP count: $IP_COUNT"
           echo "  - Port range: ${{ matrix.port_start }} to ${{ matrix.port_end }}"
           echo "  - Total ports to scan: $TOTAL_PORTS"
           echo "=========================================="
 
-      - name: Chay masscan tung port va gui file khi co ket qua
+      - name: Run masscan with real-time Telegram updates
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
           TELEGRAM_CHAT_ID: "6320839835"
         run: |
           OUTPUT_FILE="output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}.txt"
+          TEMP_FILE="temp_${{ matrix.instance }}.txt"
           > $OUTPUT_FILE
+          > $TEMP_FILE
           
           TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
           CURRENT_SCAN=0
           FOUND_IPS=0
+          LAST_SEND_TIME=$(date +%s)
           START_TIME=$(date +%s)
-          MAX_RUNTIME=350
+          MAX_RUNTIME=330 # 5.5 hours, leave 30 min buffer
+          
+          send_telegram() {
+            local COUNT=$(wc -l < $TEMP_FILE 2>/dev/null || echo 0)
+            if [ $COUNT -gt 0 ]; then
+              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+                -F chat_id="${TELEGRAM_CHAT_ID}" \
+                -F document=@$TEMP_FILE \
+                -F caption="Instance ${{ matrix.instance }}: Found $COUNT IPs (Ports ${{ matrix.port_start }}-${{ matrix.port_end }})" \
+                --max-time 30 || true
+              > $TEMP_FILE
+            fi
+          }
           
           for PORT in $(seq ${{ matrix.port_start }} ${{ matrix.port_end }}); do
             CURRENT_TIME=$(date +%s)
@@ -120,38 +149,36 @@ jobs:
             if [ $RUNTIME -ge $MAX_RUNTIME ]; then
               echo ""
               echo "=========================================="
-              echo "TIME LIMIT REACHED! Stopping scan..."
+              echo "⚠️ TIME LIMIT REACHED! Stopping scan..."
               echo "Runtime: ${RUNTIME}m / 360m"
               echo "Ports scanned: $CURRENT_SCAN / $TOTAL_PORTS"
               echo "=========================================="
+              send_telegram
               break
             fi
             
             CURRENT_SCAN=$((CURRENT_SCAN + 1))
             PERCENT=$(( (CURRENT_SCAN * 100) / TOTAL_PORTS ))
             
-            printf "\r[%d/%d] (%d%%) - Scanning port %d... (Runtime: %dm)" $CURRENT_SCAN $TOTAL_PORTS $PERCENT $PORT $RUNTIME
+            printf "\r[%d/%d] (%d%%) Scanning port %d... (Runtime: %dm)" $CURRENT_SCAN $TOTAL_PORTS $PERCENT $PORT $RUNTIME
             
             RESULT=$(sudo masscan -iL chunk.txt -p$PORT --rate=10000 -oJ - 2>/dev/null | \
-            sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
-            jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null)
+              sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
+              jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null || true)
             
-            if [ ! -z "$RESULT" ]; then
+            if [ ! -z "$RESULT" ] && [ "$RESULT" != "null" ]; then
               echo "$RESULT" >> $OUTPUT_FILE
+              echo "$RESULT" >> $TEMP_FILE
               FOUND_COUNT=$(echo "$RESULT" | wc -l)
               FOUND_IPS=$((FOUND_IPS + FOUND_COUNT))
               echo ""
               echo "  [+] Found $FOUND_COUNT IPs on port $PORT (Total: $FOUND_IPS)"
-              
-              TEMP_FILE="temp_port_$PORT.txt"
-              echo "$RESULT" > $TEMP_FILE
-              
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-                -F chat_id="${TELEGRAM_CHAT_ID}" \
-                -F document=@$TEMP_FILE \
-                -F caption="Instance ${{ matrix.instance }} | Port $PORT | Found $FOUND_COUNT IPs"
-              
-              rm -f $TEMP_FILE
+            fi
+            
+            CURRENT_TIME=$(date +%s)
+            if [ $((CURRENT_TIME - LAST_SEND_TIME)) -ge 10 ]; then
+              send_telegram
+              LAST_SEND_TIME=$CURRENT_TIME
             fi
             
             if [ $((CURRENT_SCAN % 20)) -eq 0 ]; then
@@ -167,6 +194,8 @@ jobs:
             fi
           done
           
+          send_telegram
+          
           END_TIME=$(date +%s)
           TOTAL_TIME=$((END_TIME - START_TIME))
           TOTAL_MIN=$((TOTAL_TIME / 60))
@@ -179,16 +208,14 @@ jobs:
           echo "  - IPs found: $FOUND_IPS"
           echo "  - Output file: $OUTPUT_FILE"
           echo "=========================================="
-          echo "So luong IP:port tim duoc: $(wc -l < $OUTPUT_FILE)"
           
-          if [ $FOUND_IPS -gt 0 ]; then
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-              -F chat_id="${TELEGRAM_CHAT_ID}" \
-              -F document=@$OUTPUT_FILE \
-              -F caption="Instance ${{ matrix.instance }} FINAL | Total $FOUND_IPS IPs"
+          if [ -f "$OUTPUT_FILE" ]; then
+            echo "Total IP:port found: $(wc -l < $OUTPUT_FILE)"
+          else
+            echo "No output file generated"
           fi
       
-      - name: Upload ket qua
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
           name: output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}
@@ -201,54 +228,55 @@ jobs:
     if: always()
     
     steps:
-      - name: Download tat ca ket qua
+      - name: Download all results
         uses: actions/download-artifact@v4
         with:
           pattern: output_*
           path: ./all_outputs/
           merge-multiple: true
       
-      - name: Gop tat ca file va gui telegram
-        env:
-          TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
-          TELEGRAM_CHAT_ID: "6320839835"
+      - name: Merge all results
         run: |
           cd all_outputs
-          
-          echo "=========================================="
-          echo "Merging all results..."
-          echo "=========================================="
-          
-          cat output_*.txt 2>/dev/null | sort -u > final_result.txt
-          FINAL_COUNT=$(wc -l < final_result.txt)
-          echo "Final total IP:port: $FINAL_COUNT"
-          cp final_result.txt ../final_result.txt
+          if ls *.txt 1> /dev/null 2>&1; then
+            cat *.txt 2>/dev/null > final_result.txt
+            COUNT=$(wc -l < final_result.txt)
+            echo "Total IP:port: $COUNT"
+            cp final_result.txt ../final_result.txt
+          else
+            echo "No output files found"
+            echo "" > ../final_result.txt
+          fi
       
-      - name: Gui ket qua cuoi cung len Telegram
+      - name: Send final result to Telegram
         env:
           TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
           TELEGRAM_CHAT_ID: "6320839835"
         run: |
-          COUNT=$(wc -l < final_result.txt)
+          COUNT=$(wc -l < final_result.txt 2>/dev/null || echo 0)
           
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="SCAN COMPLETED! Total IP:port: ${COUNT}" \
-            -d parse_mode="HTML"
+            -d text="🎯 SCAN COMPLETED! Total IP:port: ${COUNT}" \
+            -d parse_mode="HTML" \
+            --max-time 30 || true
           
           if [ $COUNT -gt 0 ]; then
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHAT_ID}" \
               -F document=@final_result.txt \
-              -F caption="FINAL RESULT: All ports 1000-5000 (20 instances)"
+              -F caption="FINAL RESULT: All ports 1000-5000 (20 instances)" \
+              --max-time 30 || true
           else
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d text="Khong tim thay IP:port nao"
+              -d text="❌ No IP:port found" \
+              --max-time 30 || true
           fi
       
-      - name: Upload ket qua cuoi cung
+      - name: Upload final result
         uses: actions/upload-artifact@v4
         with:
           name: final_result
           path: final_result.txt
+          if-no-files-found: ignore
