@@ -204,42 +204,24 @@ jobs:
           path: ./all_outputs/
           merge-multiple: true
       
-      - name: Merge va gui telegram moi 10 giay
+      - name: Gop tat ca file va gui telegram moi 10s
         env:
           TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
           TELEGRAM_CHAT_ID: "6320839835"
         run: |
           cd all_outputs
           
-          # Tao file tong
-          > all_results.txt
-          LAST_SEND_TIME=$(date +%s)
-          START_TIME=$(date +%s)
-          TOTAL_FOUND=0
-          
-          # Ham gui ket qua len Telegram
-          send_telegram() {
-            local COUNT=$(wc -l < temp_send.txt 2>/dev/null || echo 0)
-            if [ $COUNT -gt 0 ]; then
-              # Gui file ket qua
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-                -F chat_id="${TELEGRAM_CHAT_ID}" \
-                -F document=@temp_send.txt \
-                -F caption="📊 Live Results: Found $COUNT IPs (Total: $TOTAL_FOUND)"
-              
-              # Xoa file tam sau khi gui
-              > temp_send.txt
-            fi
-          }
-          
-          # Tao file temp
-          > temp_send.txt
-          
           echo "=========================================="
           echo "Starting merge and send every 10 seconds"
           echo "=========================================="
           
-          # Vong lap kiem tra file moi
+          LAST_SEND_TIME=$(date +%s)
+          START_TIME=$(date +%s)
+          PREVIOUS_COUNT=0
+          
+          # Tao file tam de gui
+          > temp_send.txt
+          
           while true; do
             CURRENT_TIME=$(date +%s)
             RUNTIME=$(( (CURRENT_TIME - START_TIME) / 60 ))
@@ -247,42 +229,49 @@ jobs:
             # Kiem tra neu qua 6h thi dung
             if [ $RUNTIME -ge 360 ]; then
               echo "Time limit reached, sending final results..."
-              send_telegram
+              # Gop tat ca va gui lan cuoi
+              cat output_*.txt 2>/dev/null | sort -u > all_merged.txt
+              COUNT=$(wc -l < all_merged.txt)
+              if [ $COUNT -gt 0 ] && [ $COUNT -gt $PREVIOUS_COUNT ]; then
+                cp all_merged.txt temp_send.txt
+                curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+                  -F chat_id="${TELEGRAM_CHAT_ID}" \
+                  -F document=@temp_send.txt \
+                  -F caption="📊 FINAL: $COUNT IPs found"
+              fi
               break
             fi
             
             # Kiem tra xem da co file output chua
             if ls output_*.txt 1> /dev/null 2>&1; then
-              # Gop tat ca file output vao file tong
-              cat output_*.txt 2>/dev/null | sort -u > all_results.txt
-              NEW_COUNT=$(wc -l < all_results.txt)
+              # Gop tat ca file output
+              cat output_*.txt 2>/dev/null | sort -u > all_merged.txt
+              CURRENT_COUNT=$(wc -l < all_merged.txt)
               
-              # Kiem tra neu co IP moi
-              if [ $NEW_COUNT -gt $TOTAL_FOUND ]; then
-                # Lay cac IP moi
-                tail -n +$((TOTAL_FOUND + 1)) all_results.txt > temp_send.txt 2>/dev/null
-                TOTAL_FOUND=$NEW_COUNT
+              # Neu co IP moi
+              if [ $CURRENT_COUNT -gt $PREVIOUS_COUNT ]; then
+                # Tao file chi chua IP moi
+                > temp_send.txt
+                # Lay cac IP moi (tu PREVIOUS_COUNT+1 den CURRENT_COUNT)
+                head -n $CURRENT_COUNT all_merged.txt | tail -n +$((PREVIOUS_COUNT + 1)) > temp_send.txt
+                PREVIOUS_COUNT=$CURRENT_COUNT
               fi
             fi
             
             # Gui moi 10 giay neu co du lieu
             if [ $((CURRENT_TIME - LAST_SEND_TIME)) -ge 10 ]; then
               if [ -s temp_send.txt ]; then
-                send_telegram
+                COUNT=$(wc -l < temp_send.txt)
+                TOTAL=$(cat output_*.txt 2>/dev/null | sort -u | wc -l)
+                curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+                  -F chat_id="${TELEGRAM_CHAT_ID}" \
+                  -F document=@temp_send.txt \
+                  -F caption="📊 Live: +$COUNT new IPs (Total: $TOTAL)"
+                
+                # Xoa file tam sau khi gui
+                > temp_send.txt
               fi
               LAST_SEND_TIME=$CURRENT_TIME
-            fi
-            
-            # Kiem tra neu tat ca instance da hoan thanh
-            # (kiem tra so luong file output da du)
-            OUTPUT_COUNT=$(ls output_*.txt 2>/dev/null | wc -l)
-            if [ $OUTPUT_COUNT -ge 20 ]; then
-              echo "All 20 instances completed!"
-              # Gui lan cuoi
-              if [ -s temp_send.txt ]; then
-                send_telegram
-              fi
-              break
             fi
             
             sleep 2
