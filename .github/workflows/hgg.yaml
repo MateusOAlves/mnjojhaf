@@ -119,26 +119,27 @@ jobs:
           TELEGRAM_CHAT_ID: "6320839835"
         run: |
           OUTPUT_FILE="output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}.txt"
-          TEMP_FILE="temp_${{ matrix.instance }}.txt"
           > $OUTPUT_FILE
-          > $TEMP_FILE
           
           TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
           CURRENT_SCAN=0
           FOUND_IPS=0
           LAST_SEND_TIME=$(date +%s)
           START_TIME=$(date +%s)
-          MAX_RUNTIME=330 # 5.5 hours, leave 30 min buffer
+          MAX_RUNTIME=330
           
           send_telegram() {
-            local COUNT=$(wc -l < $TEMP_FILE 2>/dev/null || echo 0)
-            if [ $COUNT -gt 0 ]; then
+            local PORT=$1
+            local TEMP_FILE="temp_${PORT}.txt"
+            
+            if [ -f "$TEMP_FILE" ] && [ -s "$TEMP_FILE" ]; then
+              local COUNT=$(wc -l < $TEMP_FILE)
               curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
                 -F chat_id="${TELEGRAM_CHAT_ID}" \
                 -F document=@$TEMP_FILE \
-                -F caption="Instance ${{ matrix.instance }}: Found $COUNT IPs (Ports ${{ matrix.port_start }}-${{ matrix.port_end }})" \
+                -F caption="Instance ${{ matrix.instance }}: Found $COUNT IPs on port ${PORT}" \
                 --max-time 30 || true
-              > $TEMP_FILE
+              rm -f $TEMP_FILE
             fi
           }
           
@@ -153,7 +154,9 @@ jobs:
               echo "Runtime: ${RUNTIME}m / 360m"
               echo "Ports scanned: $CURRENT_SCAN / $TOTAL_PORTS"
               echo "=========================================="
-              send_telegram
+              for REMAINING_PORT in $(seq $PORT ${{ matrix.port_end }}); do
+                send_telegram $REMAINING_PORT
+              done
               break
             fi
             
@@ -168,17 +171,16 @@ jobs:
             
             if [ ! -z "$RESULT" ] && [ "$RESULT" != "null" ]; then
               echo "$RESULT" >> $OUTPUT_FILE
-              echo "$RESULT" >> $TEMP_FILE
+              
+              TEMP_FILE="temp_${PORT}.txt"
+              echo "$RESULT" > $TEMP_FILE
+              
               FOUND_COUNT=$(echo "$RESULT" | wc -l)
               FOUND_IPS=$((FOUND_IPS + FOUND_COUNT))
               echo ""
               echo "  [+] Found $FOUND_COUNT IPs on port $PORT (Total: $FOUND_IPS)"
-            fi
-            
-            CURRENT_TIME=$(date +%s)
-            if [ $((CURRENT_TIME - LAST_SEND_TIME)) -ge 10 ]; then
-              send_telegram
-              LAST_SEND_TIME=$CURRENT_TIME
+              
+              send_telegram $PORT
             fi
             
             if [ $((CURRENT_SCAN % 20)) -eq 0 ]; then
