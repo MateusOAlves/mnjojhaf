@@ -17,25 +17,32 @@ jobs:
       matrix:
         include:
           - instance: 1
-            port: 8080
+            port_start: 1000
+            port_end: 1888
           - instance: 2
-            port: 3128
+            port_start: 1889
+            port_end: 2777
           - instance: 3
-            port: 80
+            port_start: 2778
+            port_end: 3666
           - instance: 4
-            port: 1080
+            port_start: 3667
+            port_end: 4555
           - instance: 5
-            port: 3129
+            port_start: 4556
+            port_end: 5444
           - instance: 6
-            port: 8800
+            port_start: 5445
+            port_end: 6333
           - instance: 7
-            port: 8000
+            port_start: 6334
+            port_end: 7222
           - instance: 8
-            port: 8888
+            port_start: 7223
+            port_end: 8111
           - instance: 9
-            port: 9999
-          - instance: 10
-            port: 443
+            port_start: 8112
+            port_end: 9000
 
     steps:
       - uses: actions/checkout@v4
@@ -48,31 +55,31 @@ jobs:
       - name: Chia file ipv4.txt cho instance
         run: |
           TOTAL=$(wc -l < ipv4.txt)
-          LINES=$((TOTAL / 10))
+          LINES=$((TOTAL / 9))
           START=$(( (${{ matrix.instance }} - 1) * LINES + 1 ))
           END=$(( ${{ matrix.instance }} * LINES ))
           
-          if [ ${{ matrix.instance }} -eq 10 ]; then
+          if [ ${{ matrix.instance }} -eq 9 ]; then
             END=$TOTAL
           fi
           
           sed -n "${START},${END}p" ipv4.txt > chunk.txt
-          echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP - Port: ${{ matrix.port }}"
+          echo "Instance ${{ matrix.instance }}: $(wc -l < chunk.txt) IP - Ports: ${{ matrix.port_start }}-${{ matrix.port_end }}"
 
       - name: Chay masscan voi sudo
         continue-on-error: true
         run: |
-          sudo masscan -iL chunk.txt -p${{ matrix.port }} --rate=159000 -oJ - | \
+          sudo masscan -iL chunk.txt -p${{ matrix.port_start }}-${{ matrix.port_end }} --rate=159000 -oJ - | \
           sed '1d;$d;s/^[[:space:]]*,[[:space:]]*//' | \
-          jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output_${{ matrix.instance }}_${{ matrix.port }}.txt
+          jq -r '.ip as $ip | .ports[] | "\($ip):\(.port)"' 2>/dev/null > output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}.txt
           
-          echo "Instance ${{ matrix.instance }} da scan xong port ${{ matrix.port }}"
+          echo "Instance ${{ matrix.instance }} da scan xong ports ${{ matrix.port_start }}-${{ matrix.port_end }}"
       
       - name: Upload ket qua
         uses: actions/upload-artifact@v4
         with:
-          name: output_${{ matrix.instance }}_${{ matrix.port }}
-          path: output_${{ matrix.instance }}_${{ matrix.port }}.txt
+          name: output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}
+          path: output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}.txt
           if-no-files-found: ignore
 
   merge-and-send:
@@ -112,7 +119,7 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHAT_ID}" \
               -F document=@final_result.txt \
-              -F caption="Ket qua scan cac port: 8080, 3128, 80, 1080, 3129, 8800, 8000, 8888, 9999, 443"
+              -F caption="Ket qua scan cac port tu 1000 den 9000"
           else
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
