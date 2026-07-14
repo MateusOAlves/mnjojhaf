@@ -99,38 +99,74 @@ jobs:
           sed -n "${START},${END}p" ipv4.txt > chunk.txt
           IP_COUNT=$(wc -l < chunk.txt)
           TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
-          TOTAL_SCANS=$(( IP_COUNT * TOTAL_PORTS ))
           
           echo "=========================================="
           echo "Instance ${{ matrix.instance }}"
           echo "  - IP count: $IP_COUNT"
           echo "  - Port range: ${{ matrix.port_start }} to ${{ matrix.port_end }}"
-          echo "  - Total ports: $TOTAL_PORTS"
-          echo "  - Total scans: $TOTAL_SCANS"
+          echo "  - Total ports to scan: $TOTAL_PORTS"
           echo "=========================================="
 
-      - name: Chay masscan tung port mot voi stats
+      - name: Chay masscan tung port mot voi stats va gui tele
         continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
+          TELEGRAM_CHAT_ID: "6320839835"
         run: |
           # Tao file output
           OUTPUT_FILE="output_${{ matrix.instance }}_${{ matrix.port_start }}-${{ matrix.port_end }}.txt"
+          TEMP_FILE="temp_${{ matrix.instance }}.txt"
           > $OUTPUT_FILE
+          > $TEMP_FILE
           
-          IP_COUNT=$(wc -l < chunk.txt)
           TOTAL_PORTS=$(( ${{ matrix.port_end }} - ${{ matrix.port_start }} + 1 ))
-          TOTAL_SCANS=$(( IP_COUNT * TOTAL_PORTS ))
           CURRENT_SCAN=0
           FOUND_IPS=0
-          
+          LAST_SEND_TIME=$(date +%s)
           START_TIME=$(date +%s)
+          MAX_RUNTIME=350 # 5h50 phut (350 phut), de 10 phut du phong
+          
+          # Ham gui ket qua len Telegram
+          send_telegram() {
+            local COUNT=$(wc -l < $TEMP_FILE)
+            if [ $COUNT -gt 0 ]; then
+              # Gui file ket qua
+              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+                -F chat_id="${TELEGRAM_CHAT_ID}" \
+                -F document=@$TEMP_FILE \
+                -F caption="Instance ${{ matrix.instance }}: Found $COUNT IPs (Ports ${{ matrix.port_start }}-${{ matrix.port_end }})"
+              
+              # Xoa file tam sau khi gui
+              > $TEMP_FILE
+            fi
+          }
           
           # Vong lap quet tung port
           for PORT in $(seq ${{ matrix.port_start }} ${{ matrix.port_end }}); do
+            # Kiem tra thoi gian chay
+            CURRENT_TIME=$(date +%s)
+            RUNTIME=$(( (CURRENT_TIME - START_TIME) / 60 ))
+            
+            # Neu chay gan 6h (350 phut) thi dung lai
+            if [ $RUNTIME -ge $MAX_RUNTIME ]; then
+              echo ""
+              echo "=========================================="
+              echo "⚠️  TIME LIMIT REACHED! Stopping scan..."
+              echo "Runtime: ${RUNTIME}m / 360m"
+              echo "Ports scanned: $CURRENT_SCAN / $TOTAL_PORTS"
+              echo "Sending remaining results..."
+              echo "=========================================="
+              
+              # Gui ket qua con lai
+              send_telegram
+              break
+            fi
+            
             CURRENT_SCAN=$((CURRENT_SCAN + 1))
-            PERCENT=$(( (CURRENT_SCAN * 100) / TOTAL_SCANS ))
+            PERCENT=$(( (CURRENT_SCAN * 100) / TOTAL_PORTS ))
             
             # Hien thi tien do
-            printf "\r[%d/%d] (%d%%) - Scanning port %d..." $CURRENT_SCAN $TOTAL_SCANS $PERCENT $PORT
+            printf "\r[%d/%d] (%d%%) - Scanning port %d... (Runtime: %dm)" $CURRENT_SCAN $TOTAL_PORTS $PERCENT $PORT $RUNTIME
             
             # Chay masscan
             RESULT=$(sudo masscan -iL chunk.txt -p$PORT --rate=10000 -oJ - 2>/dev/null | \
@@ -139,25 +175,36 @@ jobs:
             
             if [ ! -z "$RESULT" ]; then
               echo "$RESULT" >> $OUTPUT_FILE
+              echo "$RESULT" >> $TEMP_FILE
               FOUND_COUNT=$(echo "$RESULT" | wc -l)
               FOUND_IPS=$((FOUND_IPS + FOUND_COUNT))
               echo ""
               echo "  [+] Found $FOUND_COUNT IPs on port $PORT (Total: $FOUND_IPS)"
             fi
             
-            # Hien thi stats moi 50 port
-            if [ $((CURRENT_SCAN % 50)) -eq 0 ]; then
+            # Gui ket qua moi 10 giay
+            CURRENT_TIME=$(date +%s)
+            if [ $((CURRENT_TIME - LAST_SEND_TIME)) -ge 10 ]; then
+              send_telegram
+              LAST_SEND_TIME=$CURRENT_TIME
+            fi
+            
+            # Hien thi stats moi 20 port
+            if [ $((CURRENT_SCAN % 20)) -eq 0 ]; then
               CURRENT_TIME=$(date +%s)
               ELAPSED=$((CURRENT_TIME - START_TIME))
               if [ $CURRENT_SCAN -gt 0 ]; then
                 AVG_TIME=$((ELAPSED / CURRENT_SCAN))
-                REMAINING=$(( (TOTAL_SCANS - CURRENT_SCAN) * AVG_TIME ))
+                REMAINING=$(( (TOTAL_PORTS - CURRENT_SCAN) * AVG_TIME ))
                 REMAINING_MIN=$((REMAINING / 60))
                 echo ""
-                echo "  [STATS] Elapsed: ${ELAPSED}s | Avg: ${AVG_TIME}s/scan | Remaining: ~${REMAINING_MIN}m | Found: $FOUND_IPS IPs"
+                echo "  [STATS] Elapsed: ${ELAPSED}s | Avg: ${AVG_TIME}s/port | Remaining: ~${REMAINING_MIN}m | Found: $FOUND_IPS IPs"
               fi
             fi
           done
+          
+          # Gui ket qua cuoi cung
+          send_telegram
           
           END_TIME=$(date +%s)
           TOTAL_TIME=$((END_TIME - START_TIME))
@@ -166,7 +213,7 @@ jobs:
           echo ""
           echo "=========================================="
           echo "Instance ${{ matrix.instance }} COMPLETED!"
-          echo "  - Total scans: $TOTAL_SCANS"
+          echo "  - Total ports scanned: $CURRENT_SCAN / $TOTAL_PORTS"
           echo "  - Time: ${TOTAL_TIME}s (~${TOTAL_MIN}m)"
           echo "  - IPs found: $FOUND_IPS"
           echo "  - Output file: $OUTPUT_FILE"
@@ -201,7 +248,7 @@ jobs:
           echo "Tong so IP:port: $COUNT"
           cp final_result.txt ../final_result.txt
       
-      - name: Gui ket qua len Telegram
+      - name: Gui ket qua cuoi cung len Telegram
         env:
           TELEGRAM_BOT_TOKEN: "8973833073:AAGstV_gHSEBQmo2ZiPZSguWlOcxFAPLeU4"
           TELEGRAM_CHAT_ID: "6320839835"
@@ -210,14 +257,14 @@ jobs:
           
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="Scan hoan tat! Tong so IP:port: ${COUNT}" \
+            -d text="🎯 SCAN COMPLETED! Total IP:port: ${COUNT}" \
             -d parse_mode="HTML"
           
           if [ $COUNT -gt 0 ]; then
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHAT_ID}" \
               -F document=@final_result.txt \
-              -F caption="Ket qua scan tung port tu 1000 den 5000 (20 instances)"
+              -F caption="FINAL RESULT: All ports 1000-5000 (20 instances)"
           else
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
