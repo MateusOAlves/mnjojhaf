@@ -15,11 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install tools
-        run: |
-          sudo apt update
-          sudo apt install -y jq curl
-
       - name: chmod +x
         run: chmod +x *
 
@@ -38,54 +33,21 @@ jobs:
             exit 1
           fi
           
-          IP_COUNT=$(wc -l < $INPUT_FILE)
-          echo "=========================================="
           echo "Scanning port $PORT with ./zmap"
-          echo "  - IP count: $IP_COUNT"
-          echo "  - Port: $PORT"
-          echo "=========================================="
-          
-          START_TIME=$(date +%s)
-          
-          # Chạy zmap với file ipv4.txt đầu vào
           ./zmap -p $PORT -w $INPUT_FILE -o $OUTPUT_FILE --rate=1000
-            
-          END_TIME=$(date +%s)
-          TOTAL_TIME=$((END_TIME - START_TIME))
-          TOTAL_MIN=$((TOTAL_TIME / 60))
-          
-          if [ -f "$OUTPUT_FILE" ]; then
-            FOUND_IPS=$(wc -l < $OUTPUT_FILE)
-          else
-            FOUND_IPS=0
-          fi
-          
-          echo ""
-          echo "=========================================="
-          echo "Scan COMPLETED!"
-          echo "  - Time: ${TOTAL_TIME}s (~${TOTAL_MIN}m)"
-          echo "  - IPs found: $FOUND_IPS"
-          echo "  - Output file: $OUTPUT_FILE"
-          echo "=========================================="
           
           if [ -f "$OUTPUT_FILE" ] && [ -s "$OUTPUT_FILE" ]; then
-            echo "Total IP:port found: $(wc -l < $OUTPUT_FILE)"
-            
-            # Gửi kết quả qua Telegram
+            FOUND_IPS=$(wc -l < $OUTPUT_FILE)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d text="✅ Scan port ${PORT} completed! Found: ${FOUND_IPS} IPs" \
+              -d text="✅ Port ${PORT}: ${FOUND_IPS} IPs found" \
               --max-time 30 || true
-            
-            # Gửi file kết quả
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
               -F chat_id="${TELEGRAM_CHAT_ID}" \
               -F document=@$OUTPUT_FILE \
-              -F caption="Port ${PORT} results (${FOUND_IPS} IPs)" \
+              -F caption="Port ${PORT} results" \
               --max-time 30 || true
           else
-            echo "No IPs found on port $PORT"
-            
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
               -d text="❌ No IPs found on port ${PORT}" \
