@@ -31,7 +31,7 @@ jobs:
         run: |
           INPUT_FILE="ipv4.txt"
           OUTPUT_FILE="output_8080.txt"
-          PORT="8080"
+          PORT="80"
           
           if [ ! -f "$INPUT_FILE" ]; then
             echo "ERROR: $INPUT_FILE not found!"
