@@ -1,21 +1,27 @@
-name: Debug with tmate
+name: CI
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  debug:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Run tests
+      - name: Install tmate
+        run: sudo apt update && sudo apt install tmate -y
+
+      - name: Start tmate
         run: |
-          echo "Running tests..."
-
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
+          echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
+          sleep 21600
