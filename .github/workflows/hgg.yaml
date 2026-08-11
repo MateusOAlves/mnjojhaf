@@ -17,8 +17,7 @@ jobs:
         run: |
           echo "Running tests..."
 
-      - name: Setup tmate session on failure
-        if: failure()
+      - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
         with:
           limit-access-to-actor: true
